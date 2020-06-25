@@ -9,6 +9,7 @@ from flask_restful import Resource
 class Login(Resource):
 	def post(self):
 		data = request.json
+		logger.info(f'Login Post data {data} [{type(data)}]')
 		if data is None:
 			return {
 				'status': 'fail',
@@ -16,25 +17,27 @@ class Login(Resource):
 			}, 400
 
 		try:
-			user = User.query.filter_by(
-				email=data.get('email'),
-				username=data.get('username')
-			)
-			pass_check = bcrypt.check_password_hash(
-				user.password, data.get('password')
-			)
-			if user and pass_check:
+			# user = User.query.filter_by(
+			# 	email=data.get('email'),
+			# 	username=data.get('username')
+			# ).first()
+			user = User.query.filter(
+				(User.username == data.get('username')) | (User.email == data.get('email'))
+			).first()
+			logger.info(f'Login Post user query result: {user}')
+			if user and bcrypt.check_password_hash(user.password, data.get('password')):
 				auth_token = user.encode_auth_token(user.id)
 				if auth_token:
 					return {
 						'status': 'success',
 						'message': 'Success',
+						'user': user.resp_dict(),
 						'auth_token': auth_token.decode()
 					}, 200
 			else:
 				return {
 					'status': 'fail',
-					'message': 'Username or Email Already invalid!'
+					'message': 'Username or Password are invalid!'
 				}, 401
 		except Exception as e:
 			logger.error(e)
