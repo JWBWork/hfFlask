@@ -12,12 +12,13 @@ def authenticated(func):
 			if isinstance(decode_response, str):
 				return {
 					'status': 'fail',
-					'message': decode_response
+					'message': f" decode error: {decode_response}"
 				}, 401
 			else:
 				try:
 					return func(*args, **kwargs)
 				except Exception as e:
+					logger.error(e)
 					return {
 						'status': 'fail',
 						'message': f'An error has occurred: {e}'
@@ -38,6 +39,6 @@ def check_auth(request):
 		if isinstance(decode_response, str):
 			return False
 		else:
-			return True
+			return decode_response
 	else:
 		return False

@@ -31,7 +31,8 @@ class Login(Resource):
 					return {
 						'status': 'success',
 						'message': 'Success',
-						'user': user.resp_dict(),
+						'user': user.resp_dict(include_private=True),
+						# 'user': user.resp_dict(),
 						'auth_token': auth_token.decode()
 					}, 200
 			else:

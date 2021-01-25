@@ -4,7 +4,7 @@ from flask import request
 from flask_restful import Resource
 import uuid
 import json
-from src.database import db, Post as dbPost, Tag as dbTag, User
+from src.database import db, Post as dbPost, Tag as dbTag, User as dbUser, UserFollow as dbUserFollow
 from src.aws import s3
 
 
@@ -16,7 +16,7 @@ class Post(Resource):
 		data = request.form
 		logger.info(f"Post post data[{type(data)}]: {data}")
 		user_id = data['user_id']
-		s3_name = f"{user_id}-{str(uuid.uuid4().hex)}"
+		s3_name = f"{user_id}-{data['title'].replace(' ', '-')}-{str(uuid.uuid4().hex)}.png"
 		image_file = request.files['image']
 		# TODO: remove and change image upload to frontend?
 		#  Will have to deal with cloudfront at some point anyways...
@@ -24,14 +24,13 @@ class Post(Resource):
 			image_file, s3.bucket_name,
 			object_name=s3_name
 		)
-		# TODO: move s3_url to function in post database class
-		s3_url = f"https://{s3.bucket_name}.s3.amazonaws.com/{s3_name}"
+		# s3_url = f"https://{s3.bucket_name}.s3.amazonaws.com/{s3_name}"
 		post = dbPost(
 			author_id=user_id,
 			title=data['title'],
 			desc=data.get('description'),
 			s3_name=s3_name,
-			s3_url=s3_url
+			# s3_url=s3_url
 		)
 		db.session.add(post)
 		tags = request.form['tags'].split(',')
@@ -49,15 +48,6 @@ class Post(Resource):
 			'message': 'post uploaded',
 			# TODO: implement to json function in post database class
 			'post': post.resp_dict()
-			# {
-			# 	'id': post.id,
-			# 	'title': post.title,
-			# 	's3_url': post.s3_url,
-			# 	'author_id': post.author_id,
-			# 	'description': post.desc,
-			# 	'comments': [comment.body for comment in post.comments],
-			# 	'likes': [],
-			# }
 		}, 200
 
 	def get(self):
@@ -66,26 +56,30 @@ class Post(Resource):
 		try:
 			if 'id' in data:
 				logger.info('REQUEST BY ID')
-				post = dbPost.query.get(data['id'])
-				posts = ((
-					post,
-					User.query.get(post.author_id)
-				),)
-				logger.info(posts)
+				posts = [dbPost.query.get(data['id']),]
+			elif 'feed' in data:
+				feed_query = json.loads(data['feed'])
+				posts = [post for _, post in dbUserFollow.query.filter(
+					dbUserFollow.follower_id == feed_query['userId']
+				).join(
+					dbPost, dbUserFollow.followed_id == dbPost.author_id
+				).add_entity(
+					dbPost
+				).all()]
 			else:
 				posts = dbPost.query.join(
-					User, User.id == dbPost.author_id
+					dbUser, dbUser.id == dbPost.author_id
 				).filter_by(
 					# **{'id': data.get('id')}
 				).add_entity(
-					User
+					dbUser
 				)
 				if data:
 					posts = posts.filter_by(
 						**{'id': data.get('author_id')}
 					)
-				posts = posts.all()
-			posts = [post.resp_dict() for post, user in posts]
+				posts = [post for post, user in posts.all()]
+			posts = [post.resp_dict() for post in posts]
 			return {
 				'status': 'success',
 				'message': 'post retrieved',

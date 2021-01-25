@@ -1,7 +1,7 @@
 from src.logging import logger
 from src.api import api
 from src.api.auth import check_auth, authenticated
-from src.database import db, User as db_User
+from src.database import db, User as dbUser, chats as dbChats, Chat as dbChat
 from src.bcrypt import bcrypt
 from src.aws import s3
 from flask import request
@@ -14,35 +14,18 @@ class User(Resource):
 		try:
 			data = dict(request.args)
 			logger.info(f"User get data[{type(data)}]: {data}")
-			user = db_User.query.filter_by(**data).first()
-			if authenticated:
-				# TODO: return more if authenticated
+			user = dbUser.query.filter_by(**data).first()
+			logger.warning(f'authenticated: {authenticated}')
+			if isinstance(authenticated, int):
+				same_user = authenticated == user.id
 				return {
 					'status': 'success',
-					'user': user.resp_dict()
-					# {
-					# 	'id': user.id,
-					# 	'username': user.username,
-					# 	'email': user.email,
-					# 	'admin': user.admin,
-					# 	'bio': user.bio,
-					# 	'created': str(user.created),
-					# 	'avi_url': user.avi_url()
-					# },
+					'user': user.resp_dict(include_private=same_user),
 				}, 200
 			else:
 				return {
 					'status': 'success',
 					'user': user.resp_dict()
-					# {
-					# 	'id': user.id,
-					# 	'username': user.username,
-					# 	'email': user.email,
-					# 	'admin': user.admin,
-					# 	'bio': user.bio,
-					# 	'created': str(user.created),
-					# 	'avi_url': user.avi_url()
-					# }
 				}, 200
 		except Exception as e:
 			logger.error(e)
@@ -55,8 +38,8 @@ class User(Resource):
 	def post(self):
 		data = request.form
 		logger.info(f"/user post data[{type(data)}]: {data}")
-		user = db_User.query.filter(
-			db_User.id == data['userId']
+		user = dbUser.query.filter(
+			dbUser.id == data['userId']
 		).first()
 		if 'aviFile' in request.files.keys():
 			avi_file = request.files['aviFile']
@@ -74,15 +57,6 @@ class User(Resource):
 			'status': 'success',
 			'message': 'profile updated',
 			'user': user.resp_dict()
-			# {
-			# 	'id': user.id,
-			# 	'username': user.username,
-			# 	'email': user.email,
-			# 	'admin': user.admin,
-			# 	'bio': user.bio,
-			# 	'created': str(user.created),
-			# 	'avi_url': user.avi_url()
-			# },
 		}, 200
 
 

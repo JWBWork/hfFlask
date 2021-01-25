@@ -1,4 +1,5 @@
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
 from src.logging import logger
 from pprint import pformat, pprint
@@ -34,8 +35,13 @@ def create_bucket(bucket_name, region=None):
 
 def upload_file(file, bucket_name, object_name):
 	# f = file.read()
-	s3 = boto3.client('s3')
-	s3.upload_fileobj(file, bucket_name, object_name)
+	# s3 = boto3.client('s3')
+	# s3.upload_fileobj(file, bucket_name, object_name)
+	config = TransferConfig()
+	config.use_threads = False
+	s3 = boto3.resource('s3')
+	bucket = s3.Bucket(bucket_name)
+	bucket.upload_fileobj(file, object_name, Config=config)
 
 
 def delete_file(bucket_name, file_key):

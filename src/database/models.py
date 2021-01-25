@@ -3,8 +3,60 @@ from src.bcrypt import bcrypt
 from src.aws import s3
 from flask import current_app
 from datetime import datetime, timedelta
+import time
 import jwt
 import json
+from src.logging import logger
+
+chats = db.Table(
+	'chats',
+	db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+	db.Column('chat_id', db.Integer, db.ForeignKey('chat.id'), primary_key=True)
+)
+
+messages = db.Table(
+	'messages',
+	db.Column('message_id', db.Integer, db.ForeignKey('message.id'), primary_key=True),
+	db.Column('chat_id', db.Integer, db.ForeignKey('chat.id'), primary_key=True)
+)
+
+
+class Chat(db.Model):
+	id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+	room_name = db.Column(db.String, nullable=False, unique=True)
+	messages = db.relationship(
+		'Message', secondary=messages, lazy='subquery',
+		backref=db.backref('messages', lazy=True),
+	)
+	users = db.relationship(
+		'User', secondary=chats, lazy='subquery',
+		backref=db.backref('users', lazy=True),
+	)
+
+	def resp_dict(self, exceptID=None):
+		return {
+			'roomName': self.room_name,
+			'users': [user.resp_dict(follows=False) for user in self.users if user.id != exceptID],
+			'messages': [message.resp_dict() for message in self.messages]
+		}
+
+	def __repr__(self):
+		return f"<Chat id:{self.id} name:{self.name}>"
+
+
+class Message(db.Model):
+	id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+	body = db.Column(db.String, nullable=False)
+	author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+	timestamp = db.Column(db.DateTime, nullable=False)
+
+	def resp_dict(self):
+		return {
+			'id': self.id,
+			'body': self.body,
+			'authorId': self.author_id,
+			'timestamp': int(time.mktime(self.timestamp.timetuple())) * 1000
+		}
 
 
 class User(db.Model):
@@ -13,6 +65,7 @@ class User(db.Model):
 	email = db.Column(db.String(25), unique=True, nullable=False)
 	username = db.Column(db.String(255), unique=True, nullable=False)
 	password = db.Column(db.String(255), nullable=False)
+	last_ip = db.Column(db.String(255), nullable=True)
 	created = db.Column(db.DateTime, nullable=False)
 	admin = db.Column(db.Boolean, nullable=False, default=False)
 	posts = db.relationship('Post', backref='author', lazy=True)
@@ -20,6 +73,10 @@ class User(db.Model):
 	likes = db.relationship('Like', backref='user', lazy=True)
 	bio = db.Column(db.Text, nullable=True)
 	avi_s3_name = db.Column(db.String, unique=True, nullable=True)
+	chats = db.relationship(
+		'Chat', secondary=chats, lazy='subquery',
+		backref=db.backref('chats', lazy=True)
+	)
 
 	def __init__(self, email, username, password, admin=False):
 		self.email = email
@@ -31,20 +88,35 @@ class User(db.Model):
 		self.admin = admin
 
 	def __repr__(self):
-		return f"<User id: {self.id} username: '{self.username}'"
+		return f"<User id: {self.id} username: '{self.username}'>"
 
 	def avi_url(self):
 		url = f"https://{s3.bucket_name}.s3.amazonaws.com/{self.avi_s3_name}" if self.avi_s3_name else None
 		return url
 
-	def resp_dict(self):
-		return {
+	def resp_dict(self, follows=True, include_private=False):
+		user = {
 			'id': self.id,
 			'username': self.username,
 			'created': str(self.created),
 			'bio': self.bio,
-			'avi': self.avi_url()
+			'avi': self.avi_url(),
 		}
+		if follows:
+			user['following'] = [
+				user.resp_dict(follows=False) for _, user in
+				UserFollow.query.join(
+					User, UserFollow.followed_id == User.id
+				).filter(
+					UserFollow.follower_id == self.id
+				).add_entity(
+					User
+				).all()
+			]
+		if include_private:
+			# TODO: extra information to supply to own user?
+			pass
+		return user
 
 	def encode_auth_token(self, user_id):
 		try:
@@ -75,7 +147,11 @@ class User(db.Model):
 
 
 class UserFollow(db.Model):
-	pass
+	id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+	follower_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=False)
+	followed_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=False)
+	follower = db.relationship('User', foreign_keys=[followed_id])
+	followed = db.relationship('User', foreign_keys=[follower_id])
 
 
 tags = db.Table(
@@ -107,7 +183,10 @@ class Post(db.Model):
 	desc = db.Column(db.Text, unique=False)  # TODO:Check limit and create character limit?
 	s3_name = db.Column(db.String, unique=True, nullable=False)
 	# TODO replace this with a method to return url with s3 name?
-	s3_url = db.Column(db.String, unique=True, nullable=False)
+	# s3_url = db.Column(db.String, unique=True, nullable=False)
+
+	def s3_url(self):
+		return f"https://{s3.bucket_name}.s3.amazonaws.com/{self.s3_name}"
 
 	def resp_dict(self):
 		get_user = lambda id: User.query.get(id)
@@ -116,7 +195,8 @@ class Post(db.Model):
 			'id': self.id,
 			'title': self.title,
 			'author_id': self.author_id,
-			's3_url': self.s3_url,
+			# 's3_url': self.s3_url,
+			's3_url': self.s3_url(),
 			'description': self.desc,
 			'author_username': post_author.username,
 			'author_avi': post_author.avi_url(),
@@ -135,7 +215,8 @@ class Post(db.Model):
 					'avi': get_user(like.user_id).avi_url(),
 					'username': get_user(like.user_id).username
 				} for like in self.likes
-			]
+			],
+			'tags': [tag.name for tag in self.tags]
 		}
 
 
@@ -176,3 +257,10 @@ class Like(db.Model):
 
 	def __repr__(self):
 		return f"<Like id:{self.id} user_id:{self.user_id} value:{self.value}>"
+
+
+# class MessageMap(db.Model):
+# 	map_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+# 	message_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=False)
+# 	from_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+# 	to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

@@ -7,3 +7,6 @@ from .resources.post import Post
 from .resources.comment import Comment
 from .resources.tag import Tag
 from .resources.like import Like
+from .resources.follow import UserFollow
+from .resources.message import Message
+from .resources.search import Search

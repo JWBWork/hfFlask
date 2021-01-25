@@ -196,3 +196,4 @@ dmypy.json
 .pyre/
 
 /src/database/creds.json
+/tmp/test.db

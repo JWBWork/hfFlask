@@ -2,7 +2,7 @@ from src.logging import logger
 from src.api import api
 from flask import request
 from flask_restful import Resource
-from src.database import db, Like as dbLike, User
+from src.database import db, Like as dbLike
 from src.api.auth import authenticated
 
 
